@@ -38,18 +38,18 @@ def find_bubble_points(radius_data):
 
     # 最大半径点以降の最初の極小値を見つける
     # ただし、極小値を探す範囲を最大半径点以降に限定
-    radius_threshold = 1
+    volume_min = 0.20
     if max_index != -1:
         # 最大半径点からデータ終了までを探索
         for i in range(max_index + 1, len(radius_data)):
             # 谷底を探す条件: 現在の値が両隣よりも小さい
             # ただし、配列の境界チェックも必要
             if i > 0 and i < len(radius_data) - 1:
-                if radius_data[i] < radius_threshold and radius_data[i] < radius_data[i-1] and radius_data[i] <= radius_data[i+1]:
+                if radius_data[i] < radius_data[i-1] and radius_data[i] <= radius_data[i+1]:
                     collapse_index = i
                     break # 最初の極小値を見つけたらループを抜ける
             elif i == len(radius_data) - 1: # 最後の要素の場合
-                if radius_data[i] < radius_threshold and radius_data[i] < radius_data[i-1]:
+                if radius_data[i] < radius_data[i-1]:
                     collapse_index = i
                     break
     
@@ -86,10 +86,10 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
     blurred = cv2.GaussianBlur(img, (41, 41), 0)
     
     # 適応的閾値処理
-    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 29, 2)
+    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 2)
 
     # モルフォロジー演算
-    kernel = np.ones((9,9), np.uint8)
+    kernel = np.ones((3,3), np.uint8)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
 
     # 輪郭検出
@@ -109,7 +109,7 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         # 最大の輪郭を気泡として扱う
         bubble = max(contours, key=cv2.contourArea)
 
-        # バウンディングボックスを取得
+        # バウンディングボックスを取得(左上の座標をx,y、横と縦のサイズをw,h)
         x, y, w, h = cv2.boundingRect(bubble)
 
         # 気泡のマスクを作成
@@ -160,6 +160,10 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         # キャリブレーションを適用
         volume_mm3 = volume / (calibration**3)
         equivalent_radius_mm = (3 * volume_mm3 / (4 * math.pi))**(1/3)
+        x_min_mm = x / calibration
+        x_max_mm = (x+w) / calibration
+        y_min_mm = y / calibration
+        y_max_mm = (y+h) / calibration
 
         # 大きさのチェック
         min_volume = 0
@@ -171,9 +175,9 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
                 'center': (center_of_mass[0]/calibration, center_of_mass[1]/calibration)
             }
 
-        # 図形描画 (気泡の外形と重心)
+        # 結果の可視化 (気泡の外形と重心)
         cv2.drawContours(img_result, [bubble], 0, (0, 255, 0), 2) # 緑色
-        cv2.drawMarker(img_result, center_of_mass, (0, 0, 255), cv2.MARKER_CROSS, markerSize=10, thickness=2) # 赤色
+        cv2.circle(img_result, center_of_mass, 5, (0, 0, 255), -1) # 赤色
 
         # 結果を保存 - 同様にエンコーディング問題に対処
         try:
@@ -186,7 +190,11 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         return {
             'volume': volume_mm3,
             'radius': equivalent_radius_mm,
-            'center': (center_of_mass[0]/calibration, center_of_mass[1]/calibration)
+            'center': (center_of_mass[0]/calibration, center_of_mass[1]/calibration),
+            'x_min_mm': x_min_mm,
+            'x_max_mm':x_max_mm,
+            'y_min_mm':y_min_mm,
+            'y_max_mm':y_max_mm
         }
     else:
         # 気泡が検出されない場合でも、壁面が描画された画像を保存
@@ -197,8 +205,8 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
             print(f"結果の保存に失敗しました: {output_path} - {str(e)}")
         print(f"気泡を検出できませんでした: {image_path}")
         return None
-    
-def process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num):
+
+def process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num, excel_file_name='analysis_result.lsx'):
     # 基準値ファイルのパスを正規化 - バックスラッシュを使用
     reference_path = os.path.join(base_path, 'reference.xlsx').replace('/', '\\')
     
@@ -222,7 +230,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
     os.makedirs(results_base_path, exist_ok=True)
     
     # Excelファイルの作成準備
-    excel_path = os.path.join(results_base_path, 'analysis_results.xlsx').replace('/', '\\')
+    excel_path = os.path.join(results_base_path, excel_file_name).replace('/', '\\')
     
     # データを格納するための辞書
     all_data = {}
@@ -305,7 +313,11 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
                             'volume': result['volume'],
                             'radius': result['radius'],
                             'center_x': result['center'][0],
-                            'center_y': result['center'][1]
+                            'center_y': result['center'][1],
+                            'x_min_mm':result['x_min_mm'],
+                            'x_max_mm':result['x_max_mm'],
+                            'y_min_mm':result['y_min_mm'],
+                            'y_max_mm':result['y_max_mm']
                         })
                         max_radius = max(max_radius, result['radius'])
                 except Exception as e:
@@ -344,7 +356,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
         
     # Excelファイルのデータ作成
     num_folders = len(all_data)
-    num_cols = 1 + num_folders * 5
+    num_cols = 1 + num_folders * 9
     # ヘッダー行と情報行の分も考慮して行数を調整
     df = pd.DataFrame(np.nan, index=range(120 + 5), columns=range(num_cols)) # データ120行 + ヘッダー5行
 
@@ -367,7 +379,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
         df.iloc[3, col_start + 2] = gammas.get(folder_name, 0)  # γ値
 
         # カラム名を設定（4行目、インデックスは3）
-        df.iloc[4, col_start:col_start+5] = ['t*', '体積', '半径', '重心X', '重心Y']
+        df.iloc[4, col_start:col_start+9] = ['t*', '体積', '半径', '重心X', '重心Y', 'x最小値', 'x最大値', 'y最小値', 'y最大値']
 
         # データを配置（5行目から、インデックスは4から）
         for row_idx, data in enumerate(all_data[folder_name]):
@@ -378,7 +390,11 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
                 df.iloc[data_row, col_start+2] = data['radius']
                 df.iloc[data_row, col_start+3] = data['center_x']
                 df.iloc[data_row, col_start+4] = data['center_y']
-                
+                df.iloc[data_row, col_start+5] = data['x_min_mm']
+                df.iloc[data_row, col_start+6] = data['x_max_mm']
+                df.iloc[data_row, col_start+7] = data['y_min_mm']
+                df.iloc[data_row, col_start+8] = data['y_max_mm']
+
         folder_idx += 1
 
     # Excelファイルに保存
@@ -429,14 +445,15 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
 
 if __name__ == "__main__":
     # 処理の設定 - バックスラッシュを使用
-    base_path = r'C:\流体工学研究室\実験データ\20231218'  # raw文字列として指定
-    start_folder = 1
-    end_folder = 77
-    calibration = 38
+    base_path = r'C:\Research\exp_data\20231218'  # raw文字列として指定
+    start_folder = 3
+    end_folder = 3
+    calibration = 39.4
     time_interval = 10  # 時間間隔s（秒）
     start_image_num = 7  # t*=0とする画像番号
 
     try:
-        process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num)
+        process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num, 
+                            excel_file_name="9_analysis_resuit.xlsx")
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
