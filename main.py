@@ -38,14 +38,14 @@ def find_bubble_points(radius_data):
 
     # 最大半径点以降の最初の極小値を見つける
     # ただし、極小値を探す範囲を最大半径点以降に限定
-    volume_min = 0.20
+    radius_threshold = 1.00
     if max_index != -1:
         # 最大半径点からデータ終了までを探索
         for i in range(max_index + 1, len(radius_data)):
             # 谷底を探す条件: 現在の値が両隣よりも小さい
             # ただし、配列の境界チェックも必要
             if i > 0 and i < len(radius_data) - 1:
-                if radius_data[i] < radius_data[i-1] and radius_data[i] <= radius_data[i+1]:
+                if radius_data[i] < radius_threshold and radius_data[i] < radius_data[i-1] and radius_data[i] <= radius_data[i+1]:
                     collapse_index = i
                     break # 最初の極小値を見つけたらループを抜ける
             elif i == len(radius_data) - 1: # 最後の要素の場合
@@ -372,7 +372,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
         if folder_name not in all_data:
             continue
             
-        col_start = 1 + folder_idx * 5  # 各フォルダの開始列
+        col_start = 1 + folder_idx * 9  # 各フォルダの開始列
 
         df.iloc[1, col_start + 2] = folder_num  # フォルダ番号
         df.iloc[2, col_start + 2] = max_radii.get(folder_name, 0)  # Rmax値
@@ -412,7 +412,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
             if folder_name not in all_data:
                 continue
                 
-            col_start = 1 + color_folder_idx * 5  # 各フォルダの開始列
+            col_start = 1 + color_folder_idx * 9  # 各フォルダの開始列
             radius_data = [data['radius'] for data in all_data[folder_name]]
             max_index, collapse_index = find_bubble_points(radius_data)
             
@@ -445,15 +445,19 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
 
 if __name__ == "__main__":
     # 処理の設定 - バックスラッシュを使用
-    base_path = r'C:\Research\exp_data\20231218'  # raw文字列として指定
-    start_folder = 3
-    end_folder = 3
+    base_path = r'C:\Research\exp_data\20250611'  # raw文字列として指定
+    start_folder = 2
+    end_folder = 65
     calibration = 39.4
     time_interval = 10  # 時間間隔s（秒）
     start_image_num = 7  # t*=0とする画像番号
 
     try:
         process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num, 
-                            excel_file_name="9_analysis_resuit.xlsx")
+                            excel_file_name="9_analysis_result.xlsx")
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
+
+    #calibration一覧
+    #20250417 - 32.2
+    #20250611 - 39.4
