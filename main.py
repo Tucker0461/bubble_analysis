@@ -11,8 +11,10 @@ def calculate_t_star(time, rmax):
     time: 経過時間（s）
     rmax: 最大半径（mm）
     """
-    pressure_term = (10**5/1000)**(-0.5)  # 圧力項の計算
-    denominator = 0.91468 * rmax * pressure_term * 1000
+    rho = 1000  # 水の密度 (kg/m³)
+    delta_p = 1e5  # 圧力差 (Pa)
+    
+    denominator = 0.91468 * (rmax / 1000) * (rho / delta_p)**0.5
     return time / denominator
 
 def find_bubble_points(radius_data):
@@ -360,6 +362,9 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
     # ヘッダー行と情報行の分も考慮して行数を調整
     df = pd.DataFrame(np.nan, index=range(120 + 5), columns=range(num_cols)) # データ120行 + ヘッダー5行
 
+    # A列に連番 (0-119) を追加
+    df.iloc[5:125, 0] = range(120)
+
     # 最初の列にFolder, Rmax, γを設定
     df.iloc[1, 0] = 'Folder'
     df.iloc[2, 0] = 'Rmax'
@@ -449,7 +454,7 @@ if __name__ == "__main__":
     start_folder = 2
     end_folder = 65
     calibration = 39.4
-    time_interval = 10  # 時間間隔s（秒）
+    time_interval = 0.000005  # 時間間隔s（秒）
     start_image_num = 7  # t*=0とする画像番号
 
     try:
