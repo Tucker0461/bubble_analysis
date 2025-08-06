@@ -9,18 +9,13 @@ from openpyxl import load_workbook
 def calculate_t_star(time, rmax):
     """
     t*を計算する関数
-
-    Parameters:
-    time (float): 経過時間（s）
-    rmax (float): 最大半径（mm）
-
-    Returns:
-    float: 計算されたt*の値
+    time: 経過時間（s）
+    rmax: 最大半径（mm）
     """
-    pressure_term = (10**5/1000)**(-0.5)  # 圧力項の計算
-    denominator = 0.91468 * rmax * pressure_term * 1000
-    if denominator == 0:
-        return 0 # ゼロ除算を避ける
+    rho = 1000  # 水の密度 (kg/m³)
+    delta_p = 1e5  # 圧力差 (Pa)
+    
+    denominator = 0.91468 * (rmax / 1000) * (rho / delta_p)**0.5
     return time / denominator
 
 def find_bubble_points(radius_data):
@@ -76,7 +71,7 @@ def find_bubble_points(radius_data):
 
     return max_index, collapse_index
 
-def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pixel=None):
+def calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=None):
     """
     単一の画像から気泡の特性を計算する関数
 
@@ -105,8 +100,8 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         return None
 
     # 画像処理
-    blurred = cv2.GaussianBlur(img, (37, 37), 0)
-    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 2)
+    blurred = cv2.GaussianBlur(img, (blur_x, blur_y), 0)
+    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, binary_s, 2)
     kernel = np.ones((3,3), np.uint8)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
 
@@ -207,7 +202,7 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         print(f"気泡を検出できませんでした: {image_path}")
         return None
 
-def update_excel_for_folders(folders_to_update, base_path, calibration, time_interval, start_image_num, excel_file_name='analysis_result.xlsx'):
+def update_excel_for_folders(folders_to_update, base_path, calibration, time_interval, start_image_num, blur_x, blur_y, binary_s, excel_file_name='analysis_result.xlsx'):
     """
     指定されたフォルダの気泡データを解析し、既存のExcelファイルを更新する関数。
 
@@ -292,7 +287,7 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
             image_path = os.path.join(folder_path, file_name).replace('/', '\\')
             # 結果画像を生成する必要がないため、ダミーのoutput_pathを使用
             dummy_output_path_for_radius = os.path.join(result_folder, "temp_rad_calc.bmp").replace('/', '\\')
-            result = calculate_bubble_properties(image_path, dummy_output_path_for_radius, calibration, wall_x_pixel=current_wall_x_pixel)
+            result = calculate_bubble_properties(image_path, dummy_output_path_for_radius, calibration,  blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
             radius_data.append(result['radius'] if result else 0)
             # 不要な一時ファイルを削除
             if os.path.exists(dummy_output_path_for_radius):
@@ -334,7 +329,7 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
                 # γ計算のため、改めて11番目の画像の重心X座標を計算する
                 initial_x_image_path = os.path.join(folder_path, image_files[10]).replace('/', '\\')
                 dummy_output_path_gamma = os.path.join(result_folder, "temp_gamma_calc.bmp").replace('/', '\\')
-                initial_image_result = calculate_bubble_properties(initial_x_image_path, dummy_output_path_gamma, calibration, wall_x_pixel=current_wall_x_pixel)
+                initial_image_result = calculate_bubble_properties(initial_x_image_path, dummy_output_path_gamma, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
                 
                 if initial_image_result and rmax_for_t_star > 0:
                     initial_x_mm = initial_image_result['center'][0] # mm単位の重心X
@@ -355,7 +350,7 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
             output_path = os.path.join(result_folder, f"{os.path.splitext(file_name)[0]}_result.bmp").replace('/', '\\')
 
             # ここで画像解析を再度実行し、最新の結果を取得
-            result = calculate_bubble_properties(image_path, output_path, calibration, wall_x_pixel=current_wall_x_pixel)
+            result = calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
 
             data_row_excel = idx + 6 # Excelのデータ開始行番号（1始まり）
 
@@ -429,14 +424,23 @@ if __name__ == "__main__":
     # 処理の設定
     base_path = r'C:\Research\exp_data\20250611' # raw文字列として指定
     calibration = 39.4
-    time_interval = 10  # 時間間隔s（秒）
+    time_interval = 0.000005  # 時間間隔s（秒）
     start_image_num = 7 # t*=0とする画像番号（1始まり）
 
+    blur_x = 37
+    blur_y = 37
+    binary_s = 31
+
     # 更新したいフォルダ番号のリストを指定
-    folders_to_reanalyze = [63] # 例としてフォルダ2, 3を更新
+    folders_to_reanalyze = [2] # 例としてフォルダ2, 3を更新
 
     try:
         update_excel_for_folders(folders_to_reanalyze, base_path, calibration, time_interval, start_image_num,
-                                 excel_file_name="9_analysis_result.xlsx")
+                                 excel_file_name="9_analysis_result.xlsx", blur_x = blur_x, blur_y = blur_y, binary_s = binary_s)
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
+
+
+    #calibration一覧
+    #20250417 - 32.2
+    #20250611 - 39.4
