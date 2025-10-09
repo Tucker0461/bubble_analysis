@@ -15,16 +15,17 @@ def calculate_t_star(time, rmax):
     rho = 1000  # 水の密度 (kg/m³)
     delta_p = 1e5  # 圧力差 (Pa)
     
+    # 既存の計算ロジック
     denominator = 0.91468 * (rmax / 1000) * (rho / delta_p)**0.5
     return time / denominator
 
 def find_bubble_points(radius_data):
     """
     気泡の最大半径点と最初の極小点（崩壊点）を見つける関数
-
+    
     Parameters:
     radius_data (list): 各フレームの半径データ（mm）
-
+    
     Returns:
     tuple: (最大半径のインデックス, 崩壊点（最初の極小値）のインデックス)
     """
@@ -44,7 +45,6 @@ def find_bubble_points(radius_data):
                 max_index = i
 
     # 最大半径点以降の最初の極小値を見つける
-    # この閾値は、崩壊点をより正確に見つけるために調整が必要かもしれません
     radius_threshold = 1.00 
     if max_index != -1:
         for i in range(max_index + 1, len(radius_data)):
@@ -71,21 +71,13 @@ def find_bubble_points(radius_data):
 
     return max_index, collapse_index
 
+# calculate_bubble_properties は元のコードを維持（Vagarose/Vwater計算なし）
 def calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=None):
     """
-    単一の画像から気泡の特性を計算する関数
-
-    Parameters:
-    image_path (str): 入力画像ファイルパス
-    output_path (str): 結果画像を保存するパス
-    calibration (float): ピクセルからミリメートルへの変換係数 (pix/mm)
-    wall_x_pixel (int, optional): 壁の位置を示すX座標（ピクセル）。指定すると画像に線を描画。
-
-    Returns:
-    dict or None: 気泡の体積、半径、重心、境界座標（mm単位）。検出できなかった場合はNone。
+    単一の画像から気泡の特性を計算する関数 (元のロジックを維持)
     """
     if not os.path.isfile(image_path):
-        print(f"画像ファイルが存在しません: {image_path}")
+        # print(f"画像ファイルが存在しません: {image_path}") # 不要な出力は削減
         return None
 
     try:
@@ -93,10 +85,10 @@ def calculate_bubble_properties(image_path, output_path, calibration, blur_x, bl
         img = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
 
         if img is None:
-            print(f"画像の読み込みに失敗しました: {image_path}")
+            # print(f"画像の読み込みに失敗しました: {image_path}") # 不要な出力は削減
             return None
     except Exception as e:
-        print(f"画像読み込み時にエラーが発生しました: {image_path} - {str(e)}")
+        # print(f"画像読み込み時にエラーが発生しました: {image_path} - {str(e)}") # 不要な出力は削減
         return None
 
     # 画像処理
@@ -124,7 +116,7 @@ def calculate_bubble_properties(image_path, output_path, calibration, blur_x, bl
         mask = np.zeros(binary.shape, dtype=np.uint8)
         cv2.drawContours(mask, [bubble], 0, 255, -1)
 
-        # 気泡の体積と重心を計算
+        # 気泡の体積と重心を計算 (元のロジック)
         volume = 0 # ピクセル単位の体積
         total_cx, total_cy = 0, 0
         total_area = 0
@@ -162,7 +154,7 @@ def calculate_bubble_properties(image_path, output_path, calibration, blur_x, bl
         y_min_mm = y / calibration
         y_max_mm = (y+h) / calibration
 
-        # 小さすぎる体積の気泡は無視（必要に応じて閾値設定）
+        # 小さすぎる体積の気泡は無視（元のロジックを維持）
         min_volume = 0 
         if volume_mm3 < min_volume:
             return {
@@ -204,15 +196,11 @@ def calculate_bubble_properties(image_path, output_path, calibration, blur_x, bl
 
 def update_excel_for_folders(folders_to_update, base_path, calibration, time_interval, start_image_num, blur_x, blur_y, binary_s, excel_file_name='analysis_result.xlsx'):
     """
-    指定されたフォルダの気泡データを解析し、既存のExcelファイルを更新する関数。
+    指定されたフォルダの気泡データを解析し、既存のExcelファイルを更新する関数。（元のロジックを維持）
 
     Parameters:
-    folders_to_update (list): 更新対象のフォルダ番号のリスト
-    base_path (str): 解析する画像のルートディレクトリ
-    calibration (float): ピクセルからミリメートルへの変換係数 (pix/mm)
-    time_interval (float): 各フレーム間の時間間隔（s）
-    start_image_num (int): t*=0とする画像番号（1始まり）
-    excel_file_name (str): 更新するExcelファイルの名前
+    folders_to_update (list): 更新対象のフォルダ番号のリスト (通常は単一要素 [41] で使用)
+    ... (他の引数は元コードと同じ)
     """
     # 基準値ファイルのパスを正規化
     reference_path = os.path.join(base_path, 'reference.xlsx').replace('/', '\\')
@@ -256,12 +244,12 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
         cell_value = ws.cell(row=2, column=col_idx).value 
         if isinstance(cell_value, (int, float)):
             # Folder番号のセル (col_idx) から 't*' の列までの正しいオフセットを設定
-            # 過去の試行錯誤とユーザーからのフィードバックに基づき、-2 が正しいオフセットであると判断
+            # Folder番号セルは、'Frame' -> 't*' -> '体積' -> '半径' -> '重心X' -> '重心Y' -> 'x最小値' -> 'x最大値' -> 'y最小値' -> 'y最大値' 
+            # のブロックのどこにあるかによりますが、元のコードのロジックを信じて -2 を維持します。
+            # （元のコードが動いていたことを前提に、フォルダ番号が半径の列にあると仮定）
             folder_t_star_col_map[int(cell_value)] = col_idx - 2 
             
-    # print(f"特定されたフォルダ列マッピング (t*の列番号): {folder_t_star_col_map}") # デバッグ出力削除
-
-    # 各フォルダを処理
+    # 各フォルダを処理 (folders_to_update は通常 [41] の単一要素)
     for folder_num in folders_to_update:
         folder_name = str(folder_num)
         folder_path = os.path.join(base_path, folder_name).replace('/', '\\')
@@ -282,15 +270,13 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
         # ファイルリストをソートして処理順を保証
         image_files = sorted([f for f in os.listdir(folder_path) if f.endswith('.bmp')])
 
-        # 全画像から半径データを一度収集（gamma計算用の一時処理）
+        # 全画像から半径データを一度収集（Rmax/gamma計算用の一時処理）
         for file_name in image_files:
             image_path = os.path.join(folder_path, file_name).replace('/', '\\')
-            # 結果画像を生成する必要がないため、ダミーのoutput_pathを使用
             dummy_output_path_for_radius = os.path.join(result_folder, "temp_rad_calc.bmp").replace('/', '\\')
-            result = calculate_bubble_properties(image_path, dummy_output_path_for_radius, calibration,  blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
+            result = calculate_bubble_properties(image_path, dummy_output_path_for_radius, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
             radius_data.append(result['radius'] if result else 0)
-            # 不要な一時ファイルを削除
-            if os.path.exists(dummy_output_path_for_radius):
+            if os.path.exists(dummy_output_path_for_radius): 
                 os.remove(dummy_output_path_for_radius)
 
         if not radius_data:
@@ -309,36 +295,33 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
             print(f"警告: フォルダ {folder_num} のデータがExcelファイルに見つかりません。スキップします。")
             continue
 
-        # excel_col_t_star は、現在のフォルダの 't*' データが始まるExcelの列番号（1始まり）
         excel_col_t_star = folder_t_star_col_map[folder_num] 
-        # print(f"  --> このフォルダの 't*' データ開始列 (Excel 1-based): {excel_col_t_star}") # デバッグ出力削除
 
 
         # フォルダ情報（Rmax, γ）を更新
         # Rmaxとγは、「半径の列」（'t*' の列から2つ右）に設定
         col_for_rmax_gamma = excel_col_t_star + 2
-        ws.cell(row=3, column=col_for_rmax_gamma).value = rmax_for_t_star 
-        # print(f"  --> Rmax/Gamma 書き込み列 (Excel 1-based): {col_for_rmax_gamma}") # デバッグ出力削除
+        ws.cell(row=3, column=col_for_rmax_gamma).value = rmax_for_t_star  # Rmaxは3行目
         
         # γの計算と更新
         gamma = 0
         if len(radius_data) >= 8 and folder_num in reference_dict:
             base_x = reference_dict[folder_num]
-            # 11番目のデータ（インデックス10）が存在するか確認
-            if len(radius_data) > 10: 
+            if len(radius_data) > 10:  
                 # γ計算のため、改めて11番目の画像の重心X座標を計算する
                 initial_x_image_path = os.path.join(folder_path, image_files[10]).replace('/', '\\')
                 dummy_output_path_gamma = os.path.join(result_folder, "temp_gamma_calc.bmp").replace('/', '\\')
+                # calculate_bubble_properties は結果を保存してしまうため、一時ファイルを削除
                 initial_image_result = calculate_bubble_properties(initial_x_image_path, dummy_output_path_gamma, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
                 
+                if os.path.exists(dummy_output_path_gamma): 
+                    os.remove(dummy_output_path_gamma)
+
                 if initial_image_result and rmax_for_t_star > 0:
                     initial_x_mm = initial_image_result['center'][0] # mm単位の重心X
                     gamma = (initial_x_mm - base_x / calibration) / rmax_for_t_star
-                    # 不要な一時ファイルを削除
-                    if os.path.exists(dummy_output_path_gamma):
-                        os.remove(dummy_output_path_gamma)
                 
-        ws.cell(row=4, column=col_for_rmax_gamma).value = gamma 
+        ws.cell(row=4, column=col_for_rmax_gamma).value = gamma # γは4行目
 
 
         # データ行を更新
@@ -349,7 +332,7 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
             image_path = os.path.join(folder_path, file_name).replace('/', '\\')
             output_path = os.path.join(result_folder, f"{os.path.splitext(file_name)[0]}_result.bmp").replace('/', '\\')
 
-            # ここで画像解析を再度実行し、最新の結果を取得
+            # ここで画像解析を再度実行し、最新の結果を取得 (結果画像も保存される)
             result = calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
 
             data_row_excel = idx + 6 # Excelのデータ開始行番号（1始まり）
@@ -360,24 +343,17 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
                 elapsed_time = (idx - (start_image_num - 1)) * time_interval
                 t_star = calculate_t_star(elapsed_time, rmax_for_t_star)
 
-            # 各データ列を更新
-            # ws.cell(row=行番号, column=列番号).value = 値
-            # 列番号は Excel の1始まりの番号
-            # t* は excel_col_t_star
-            # 体積は t* から +1
-            # 半径は t* から +2
-            # 重心Xは t* から +3
-            # 重心Yは t* から +4
+            # 各データ列を更新 (元のロジック通り、t*から9列分)
             if result:
-                ws.cell(row=data_row_excel, column=excel_col_t_star).value = t_star
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 1).value = result['volume']
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 2).value = result['radius']
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 3).value = result['center'][0]
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 4).value = result['center'][1]
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 5).value = result['x_min_mm']
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 6).value = result['x_max_mm']
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 7).value = result['y_min_mm']
-                ws.cell(row=data_row_excel, column=excel_col_t_star + 8).value = result['y_max_mm']
+                ws.cell(row=data_row_excel, column=excel_col_t_star).value = t_star # t*
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 1).value = result['volume'] # 体積
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 2).value = result['radius'] # 半径
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 3).value = result['center'][0] # 重心X
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 4).value = result['center'][1] # 重心Y
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 5).value = result['x_min_mm'] # x_min
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 6).value = result['x_max_mm'] # x_max
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 7).value = result['y_min_mm'] # y_min
+                ws.cell(row=data_row_excel, column=excel_col_t_star + 8).value = result['y_max_mm'] # y_max
             else:
                 # 気泡が検出されない場合は0または空欄にする
                 ws.cell(row=data_row_excel, column=excel_col_t_star).value = t_star
@@ -392,22 +368,20 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
 
 
             # 最大半径点と崩壊点のセルに色付け
-            # 体積の列のみに色付けを適用する
+            # 体積の列のみに色付けを適用する (元のロジックを維持)
             target_col_excel_for_color = excel_col_t_star + 1 # 体積の列 (t*から+1)
             
             # ターゲットセルを取得
             cell_to_color = ws.cell(row=data_row_excel, column=target_col_excel_for_color)
 
-            # このセルの既存の塗りつぶしを確実にクリアする (重要！)
+            # このセルの既存の塗りつぶしを確実にクリアする
             cell_to_color.fill = PatternFill(fill_type=None)
 
             # 条件に応じて新しい色を適用
             if idx == max_index:
                 cell_to_color.fill = PatternFill(fgColor='FF0000', fill_type='solid') # 赤色
-                # print(f"  Frame {idx}: 最大半径点検出。列 {target_col_excel_for_color} (体積) を赤色に設定。") # デバッグ出力削除
             elif idx == collapse_index:
                 cell_to_color.fill = PatternFill(fgColor='FFFF00', fill_type='solid') # 黄色
-                # print(f"  Frame {idx}: 崩壊点検出。列 {target_col_excel_for_color} (体積) を黄色に設定。") # デバッグ出力削除
 
 
     # Excelファイルを保存
@@ -422,25 +396,28 @@ def update_excel_for_folders(folders_to_update, base_path, calibration, time_int
 
 if __name__ == "__main__":
     # 処理の設定
-    base_path = r'C:\Research\exp_data\20250611' # raw文字列として指定
-    calibration = 39.4
-    time_interval = 0.000005  # 時間間隔s（秒）
+    base_path = r'C:\Research\exp_data\20250819' # raw文字列として指定
+    calibration = 39.5
+    time_interval = 0.000005 # 時間間隔s（秒）
     start_image_num = 7 # t*=0とする画像番号（1始まり）
 
-    blur_x = 37
-    blur_y = 37
+    blur_x = blur_y = 41
     binary_s = 31
 
-    # 更新したいフォルダ番号のリストを指定
-    folders_to_reanalyze = [2] # 例としてフォルダ2, 3を更新
+    # 更新したいフォルダ番号のリストを指定 (元のコードを維持)
+    folders_to_reanalyze = [3] # 例としてフォルダ41を更新
 
     try:
-        update_excel_for_folders(folders_to_reanalyze, base_path, calibration, time_interval, start_image_num,
-                                 excel_file_name="9_analysis_result.xlsx", blur_x = blur_x, blur_y = blur_y, binary_s = binary_s)
+        update_excel_for_folders(
+            folders_to_reanalyze, 
+            base_path, 
+            calibration, 
+            time_interval, 
+            start_image_num,
+            blur_x, 
+            blur_y, 
+            binary_s, 
+            excel_file_name="16_analysis_result.xlsx" # 元のファイル名を維持
+        )
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
-
-
-    #calibration一覧
-    #20250417 - 32.2
-    #20250611 - 39.4

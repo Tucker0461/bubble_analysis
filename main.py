@@ -65,7 +65,7 @@ def find_bubble_points(radius_data):
     return max_index, collapse_index
 
 # wall_x_pixel を引数に追加
-def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pixel=None):
+def calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=None):
     # ファイルの存在確認
     if not os.path.isfile(image_path):
         print(f"画像ファイルが存在しません: {image_path}")
@@ -85,10 +85,10 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         return
 
     # 画像の前処理
-    blurred = cv2.GaussianBlur(img, (41, 41), 0)
+    blurred = cv2.GaussianBlur(img, (blur_x, blur_y), 0)
     
     # 適応的閾値処理
-    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 2)
+    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, binary_s, 2)
 
     # モルフォロジー演算
     kernel = np.ones((3,3), np.uint8)
@@ -118,85 +118,134 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         mask = np.zeros(binary.shape, dtype=np.uint8)
         cv2.drawContours(mask, [bubble], 0, 255, -1)
 
-        volume = 0
-        centers = []
+        # === X軸に沿った積分（垂直円盤スタック近似）のための初期化 ===
+        volume_agarose_sum = 0   # Vagarose (左側, pixel^3 相当)
+        volume_water_sum = 0     # Vwater (右側, pixel^3 相当)
+        
+        # 重心計算用（分子: モーメント = x * Vslice または y_center * Vslice）
+        moment_x_agarose = 0     
+        moment_y_agarose = 0
+        moment_x_water = 0
+        moment_y_water = 0
+        
+        # 全体の重心計算のための累積 (面積ベース)
         total_cx, total_cy = 0, 0
-        total_area = 0
+        total_area_overall = 0
+        
+        wall_x = int(wall_x_pixel) if wall_x_pixel is not None else -1 
 
-        for i in range(h):
-            # スライスを取得
-            slice_mask = mask[y+i, x:x+w]
+        # X軸に沿ってスライス（垂直の列を走査）
+        for j in range(w):
+            x_abs = x + j # 絶対X座標
+            
+            # スライス（垂直な列）を取得
+            slice_mask = mask[y:y+h, x_abs] 
             
             if np.sum(slice_mask) > 0:
-                # スライスの左端と右端を見つける
-                non_zero = np.nonzero(slice_mask)[0]
-                left = non_zero[0]
-                right = non_zero[-1]
+                # スライスの輪郭（上端と下端）を見つける
+                non_zero_y = np.nonzero(slice_mask)[0]
+                y_top_rel = non_zero_y[0]   # yを基準とした相対座標
+                y_bottom_rel = non_zero_y[-1]
                 
-                # スライスの中心を計算
-                cx = x + left + (right - left) // 2
-                cy = y + i
+                # 半径 r(x) と中心 y_center(x) を計算 (ピクセル単位)
+                slice_height = y_bottom_rel - y_top_rel + 1
+                r_pixel = slice_height / 2
+                y_center_abs = y + y_top_rel + r_pixel - 0.5 # 絶対Y座標の中心（ピクセル）
 
-                centers.append((cx, cy))
+                # 体積素片 Vslice(x) を計算 (π * r^2 * Δx, Δx=1 pixel)
+                v_slice_pixel3 = math.pi * r_pixel**2 * 1 
 
-                # スライスの面積を計算
-                slice_area = np.sum(slice_mask > 0)
+                # 全体の重心計算（面積ベース）
+                slice_area = slice_height * 1
+                total_cx += x_abs * slice_area
+                total_cy += y_center_abs * slice_area
+                total_area_overall += slice_area
 
-                # 円盤の体積を計算
-                radius = (right - left) / 2
-                slice_volume = math.pi * radius**2
-
-                volume += slice_volume
-
-                # 重心計算のための累積
-                total_cx += cx * slice_area
-                total_cy += cy * slice_area
-                total_area += slice_area
-
-        # 気泡全体の重心を計算
-        if total_area > 0:
-            center_of_mass = (int(total_cx / total_area), int(total_cy / total_area))
+                # === Vagarose / Vwater の分割とモーメントの計算 ===
+                if wall_x != -1:
+                    # Vagarose (左側, x < wall_x)
+                    if x_abs < wall_x: 
+                        volume_agarose_sum += v_slice_pixel3
+                        moment_x_agarose += x_abs * v_slice_pixel3
+                        moment_y_agarose += y_center_abs * v_slice_pixel3
+                        
+                    # Vwater (右側, x >= wall_x)
+                    elif x_abs >= wall_x: 
+                        volume_water_sum += v_slice_pixel3
+                        moment_x_water += x_abs * v_slice_pixel3
+                        moment_y_water += y_center_abs * v_slice_pixel3
+                else:
+                    # wall_xがない場合、全体の体積として累積
+                    volume_agarose_sum += v_slice_pixel3 
+                    
+        # 気泡全体の重心を計算 (面積ベース)
+        if total_area_overall > 0:
+            center_of_mass = (int(total_cx / total_area_overall), int(total_cy / total_area_overall))
         else:
             center_of_mass = (x + w // 2, y + h // 2)
 
-        # キャリブレーションを適用
-        volume_mm3 = volume / (calibration**3)
-        equivalent_radius_mm = (3 * volume_mm3 / (4 * math.pi))**(1/3)
+        # === キャリブレーションを最後にまとめて適用 ===
+        
+        # 全体の体積を Vagarose + Vwater で定義
+        volume_total_pixel3 = volume_agarose_sum + volume_water_sum
+        
+        # 1. 体積 (mm^3)
+        volume_mm3 = volume_total_pixel3 / (calibration**3)
+        volume_agarose_mm3 = volume_agarose_sum / (calibration**3)
+        volume_water_mm3 = volume_water_sum / (calibration**3)
+        
+        # 新しい体積に基づく等価半径
+        equivalent_radius_mm = (3 * volume_mm3 / (4 * math.pi))**(1/3) 
+        
+        # 【追加】アスペクト比の計算 (h/w)
+        aspect_ratio = h / w if w != 0 else 0
+        
         x_min_mm = x / calibration
         x_max_mm = (x+w) / calibration
         y_min_mm = y / calibration
         y_max_mm = (y+h) / calibration
-
-        # 大きさのチェック
-        min_volume = 0
-        # この値は必要に応じて調整
-        if volume_mm3 < min_volume:
-            return {
-                'volume': 0,
-                'radius': 0,
-                'center': (center_of_mass[0]/calibration, center_of_mass[1]/calibration)
-            }
-
-        # 結果の可視化 (気泡の外形と重心)
+        
+        # 2. 重心 (mm)
+        # Zagarose (X)
+        center_x_agarose_mm = (moment_x_agarose / volume_agarose_sum) / calibration if volume_agarose_sum > 0 else 0
+        # Yagarose (Y)
+        center_y_agarose_mm = (moment_y_agarose / volume_agarose_sum) / calibration if volume_agarose_sum > 0 else 0
+        
+        # Zwater (X)
+        center_x_water_mm = (moment_x_water / volume_water_sum) / calibration if volume_water_sum > 0 else 0
+        # Ywater (Y)
+        center_y_water_mm = (moment_y_water / volume_water_sum) / calibration if volume_water_sum > 0 else 0
+        
+         # 結果の可視化 (気泡の外形と重心)
         cv2.drawContours(img_result, [bubble], 0, (0, 255, 0), 2) # 緑色
         cv2.circle(img_result, center_of_mass, 5, (0, 0, 255), -1) # 赤色
 
-        # 結果を保存 - 同様にエンコーディング問題に対処
+        # 結果を保存
         try:
-            # Windowsのファイルパスの問題を回避するため、imencode/imwriteを使用
             _, buf = cv2.imencode('.bmp', img_result)
             buf.tofile(output_path)
         except Exception as e:
             print(f"結果の保存に失敗しました: {output_path} - {str(e)}")
-        
+            
         return {
-            'volume': volume_mm3,
-            'radius': equivalent_radius_mm,
+            'volume': volume_mm3, 
+            'radius': equivalent_radius_mm, 
             'center': (center_of_mass[0]/calibration, center_of_mass[1]/calibration),
             'x_min_mm': x_min_mm,
             'x_max_mm':x_max_mm,
             'y_min_mm':y_min_mm,
-            'y_max_mm':y_max_mm
+            'y_max_mm':y_max_mm,
+            # Vagarose, Vwater
+            'volume_agarose': volume_agarose_mm3,
+            'volume_water': volume_water_mm3,
+            # Zagarose (X), Yagarose (Y)
+            'center_x_agarose': center_x_agarose_mm,
+            'center_y_agarose': center_y_agarose_mm,
+            # Zwater (X), Ywater (Y)
+            'center_x_water': center_x_water_mm,
+            'center_y_water': center_y_water_mm,
+            # 【追加】アスペクト比
+            'aspect_ratio': aspect_ratio
         }
     else:
         # 気泡が検出されない場合でも、壁面が描画された画像を保存
@@ -208,7 +257,7 @@ def calculate_bubble_properties(image_path, output_path, calibration, wall_x_pix
         print(f"気泡を検出できませんでした: {image_path}")
         return None
 
-def process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num, excel_file_name='analysis_result.lsx'):
+def process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num, blur_x, blur_y, binary_s, excel_file_name='analysis_result.xlsx'):
     # 基準値ファイルのパスを正規化 - バックスラッシュを使用
     reference_path = os.path.join(base_path, 'reference.xlsx').replace('/', '\\')
     
@@ -270,7 +319,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
                 try:
                     # ここでは壁面描画のためだけに calculate_bubble_properties を呼び出す (結果は一旦無視)
                     # 壁面情報も渡すように変更
-                    result = calculate_bubble_properties(image_path, output_path, calibration, wall_x_pixel=current_wall_x_pixel)
+                    result = calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
                     if result:
                         radius_data.append(result['radius'])
                     else:
@@ -299,9 +348,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
                 output_path = os.path.join(result_folder, f"{os.path.splitext(file_name)[0]}_result.bmp").replace('/', '\\')
                 
                 try:
-                    # ここで再度 calculate_bubble_properties を呼び出して実際のデータと描画を行う
-                    # 壁面情報も渡すように変更
-                    result = calculate_bubble_properties(image_path, output_path, calibration, wall_x_pixel=current_wall_x_pixel)
+                    result = calculate_bubble_properties(image_path, output_path, calibration, blur_x, blur_y, binary_s, wall_x_pixel=current_wall_x_pixel)
                     if result:
                         # t*の計算
                         if idx < start_image_num - 1 or rmax_for_t_star == 0:
@@ -319,7 +366,18 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
                             'x_min_mm':result['x_min_mm'],
                             'x_max_mm':result['x_max_mm'],
                             'y_min_mm':result['y_min_mm'],
-                            'y_max_mm':result['y_max_mm']
+                            'y_max_mm':result['y_max_mm'],
+                            # Vagarose, Vwater
+                            'volume_agarose': result['volume_agarose'],
+                            'volume_water': result['volume_water'],
+                            # Zagarose (X), Yagarose (Y)
+                            'center_x_agarose': result['center_x_agarose'],
+                            'center_y_agarose': result['center_y_agarose'],
+                            # Zwater (X), Ywater (Y)
+                            'center_x_water': result['center_x_water'],
+                            'center_y_water': result['center_y_water'],
+                            # 【追加】アスペクト比
+                            'aspect_ratio': result['aspect_ratio']
                         })
                         max_radius = max(max_radius, result['radius'])
                 except Exception as e:
@@ -358,38 +416,44 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
         
     # Excelファイルのデータ作成
     num_folders = len(all_data)
-    num_cols = 1 + num_folders * 9
+    num_cols = 1 + num_folders * 16
     # ヘッダー行と情報行の分も考慮して行数を調整
     df = pd.DataFrame(np.nan, index=range(120 + 5), columns=range(num_cols)) # データ120行 + ヘッダー5行
 
     # A列に連番 (0-119) を追加
-    df.iloc[5:125, 0] = range(120)
+    df.iloc[5:125, 0] = [int(i) for i in range(120)]
 
     # 最初の列にFolder, Rmax, γを設定
     df.iloc[1, 0] = 'Folder'
     df.iloc[2, 0] = 'Rmax'
     df.iloc[3, 0] = 'γ'
 
-    # 各フォルダのデータを配置
+     # 各フォルダのデータを配置
     folder_idx = 0
     for folder_num in range(start_folder, end_folder + 1):
         folder_name = str(folder_num)
         if folder_name not in all_data:
             continue
             
-        col_start = 1 + folder_idx * 9  # 各フォルダの開始列
+        col_start = 1 + folder_idx * 16 # 各フォルダの開始列を 15 に変更
 
-        df.iloc[1, col_start + 2] = folder_num  # フォルダ番号
-        df.iloc[2, col_start + 2] = max_radii.get(folder_name, 0)  # Rmax値
-        df.iloc[3, col_start + 2] = gammas.get(folder_name, 0)  # γ値
+        df.iloc[1, col_start + 2] = folder_num
+        df.iloc[2, col_start + 2] = max_radii.get(folder_name, 0)
+        df.iloc[3, col_start + 2] = gammas.get(folder_name, 0)
 
-        # カラム名を設定（4行目、インデックスは3）
-        df.iloc[4, col_start:col_start+9] = ['t*', '体積', '半径', '重心X', '重心Y', 'x最小値', 'x最大値', 'y最小値', 'y最大値']
+        # カラム名を16個に変更
+        df.iloc[4, col_start:col_start+16] = [
+            't*', '体積', '半径', '重心X', '重心Y', 
+            'x最小値', 'x最大値', 'y最小値', 'y最大値', 
+            'Vagarose', 'Vwater', 'Xagarose', 'Xwater', 'Yagarose', 
+            'Ywater', 'AR' # ARを追加
+        ]
+        # (Vx_min/maxは未使用だがカラム数を保持)
 
-        # データを配置（5行目から、インデックスは4から）
+        # データを配置（5行目から）
         for row_idx, data in enumerate(all_data[folder_name]):
-            if row_idx < 120:  # 120行までのデータのみを保存
-                data_row = row_idx + 5  # データは6行目から開始 (Excelの行番号) -> DataFrameのインデックスは5から
+            if row_idx < 120: 
+                data_row = row_idx + 5
                 df.iloc[data_row, col_start] = data['t_star']
                 df.iloc[data_row, col_start+1] = data['volume']
                 df.iloc[data_row, col_start+2] = data['radius']
@@ -399,6 +463,17 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
                 df.iloc[data_row, col_start+6] = data['x_max_mm']
                 df.iloc[data_row, col_start+7] = data['y_min_mm']
                 df.iloc[data_row, col_start+8] = data['y_max_mm']
+                # Vagarose, Vwater
+                df.iloc[data_row, col_start+9] = data['volume_agarose']
+                df.iloc[data_row, col_start+10] = data['volume_water']
+                # Zagarose (X), Xwater(X)
+                df.iloc[data_row, col_start+11] = data['center_x_agarose']
+                df.iloc[data_row, col_start+12] = data['center_x_water']
+                # Yagarose(Y), Ywater (Y)
+                df.iloc[data_row, col_start+13] = data['center_y_agarose']
+                df.iloc[data_row, col_start+14] = data['center_y_water']
+                #アスペクト比
+                df.iloc[data_row, col_start+15] = data['aspect_ratio'] 
 
         folder_idx += 1
 
@@ -417,7 +492,7 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
             if folder_name not in all_data:
                 continue
                 
-            col_start = 1 + color_folder_idx * 9  # 各フォルダの開始列
+            col_start = 1 + color_folder_idx * 16  # 各フォルダの開始列
             radius_data = [data['radius'] for data in all_data[folder_name]]
             max_index, collapse_index = find_bubble_points(radius_data)
             
@@ -450,19 +525,25 @@ def process_all_folders(start_folder, end_folder, base_path, calibration, time_i
 
 if __name__ == "__main__":
     # 処理の設定 - バックスラッシュを使用
-    base_path = r'C:\Research\exp_data\20250611'  # raw文字列として指定
+    base_path = r'C:\Research\exp_data\20250819'  # raw文字列として指定
     start_folder = 2
-    end_folder = 65
-    calibration = 39.4
+    end_folder = 116
+    calibration = 39.5
     time_interval = 0.000005  # 時間間隔s（秒）
     start_image_num = 7  # t*=0とする画像番号
 
+    blur_x = blur_y = 41
+    binary_s = 31
+
     try:
-        process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num, 
-                            excel_file_name="9_analysis_result.xlsx")
+        process_all_folders(start_folder, end_folder, base_path, calibration, time_interval, start_image_num,
+                             excel_file_name="16_analysis_result.xlsx", blur_x = blur_x, blur_y = blur_y, binary_s = binary_s)
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
 
     #calibration一覧
-    #20250417 - 32.2
-    #20250611 - 39.4
+    #20231210(0.7) - 38
+    #20231218(0.3) - 36
+    #20250417(0.4) - 32.2
+    #20250611(0.5) - 39.4
+    #20250819(0.5) - 39.5
