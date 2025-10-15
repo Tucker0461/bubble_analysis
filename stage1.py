@@ -77,7 +77,7 @@ def load_background_image(folder_path, blur_x, blur_y, background_no):
         return None
 
 
-def process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, diff_threshold, wall_x_pixel, min_area_pixel2):
+def process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, morph_x, morph_y, diff_threshold, wall_x_pixel, min_area_pixel2):
     """
     画像を読み込み、背景差分で2値化し、結果を描画して保存する。
     """
@@ -95,8 +95,7 @@ def process_and_save_binary(image_path, binary_output_path, result_output_path, 
         return False
 
     # 1. 画像の前処理と2値化
-    blurred_current = img
-    #blurred_current = cv2.GaussianBlur(img, (blur_x, blur_y), 0)
+    blurred_current = cv2.GaussianBlur(img, (blur_x, blur_y), 0)
     
     if blurred_background is None or blurred_current.shape != blurred_background.shape:
         binary = np.zeros_like(img, dtype=np.uint8) 
@@ -106,7 +105,7 @@ def process_and_save_binary(image_path, binary_output_path, result_output_path, 
 
 
     # 2. モルフォロジー演算
-    kernel = np.ones((3,3), np.uint8)
+    kernel = np.ones((morph_x, morph_y), np.uint8)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
     
     # 3. 可視化（描画と保存）
@@ -133,7 +132,7 @@ def process_and_save_binary(image_path, binary_output_path, result_output_path, 
         return False
 
 
-def stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, diff_threshold, min_area_pixel2):
+def stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, morph_y, diff_threshold, min_area_pixel2):
     # 基準値ファイルのパスを正規化
     reference_path = os.path.join(base_path, 'reference.xlsx').replace('/', '\\')
     
@@ -181,23 +180,24 @@ def stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, diff_thresh
                 # 【修正点】ファイル名指定: _result.bmp
                 result_output_path = os.path.join(result_folder, f"{os.path.splitext(file_name)[0]}_result.bmp").replace('/', '\\')
                 
-                process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, diff_threshold, wall_x_pixel=current_wall_x_pixel, min_area_pixel2=min_area_pixel2)
+                process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, morph_x, morph_y, diff_threshold, wall_x_pixel=current_wall_x_pixel, min_area_pixel2=min_area_pixel2)
                 
     print("Stage 1 完了: 全ての2値化画像と結果描画画像を保存しました。")
 
 if __name__ == "__main__":
     # --- Stage 1 設定 ---
-    base_path = r'C:\Research\exp_data\20250611' 
-    start_folder = 52
-    end_folder = 52
-    background_no = 4
+    base_path = r'C:\Research\exp_data\20250819' 
+    start_folder = 112
+    end_folder = 112
+    background_no = 6
     
     # 2値化パラメータ
-    diff_threshold = 55 # 背景差分後の閾値
-    blur_x = blur_y = 1
-    min_area_pixel2 = 20
+    diff_threshold = 10 # 背景差分後の閾値
+    blur_x = blur_y = 5
+    morph_x = morph_y = 5
+    min_area_pixel2 = 40
 
     try:
-        stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, diff_threshold, min_area_pixel2)
+        stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, morph_y, diff_threshold, min_area_pixel2)
     except Exception as e:
         print(f"Stage 1 実行中にエラーが発生しました: {str(e)}")

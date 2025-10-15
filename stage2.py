@@ -11,7 +11,7 @@ import sys
 # T*計算関数
 def calculate_t_star(time, rmax):
     """
-    t*を計算する関数
+    t*を計算する関数 (フォルダごとのRmaxを使用)
     """
     rho = 1000 # 水の密度 (kg/m³)
     delta_p = 1e5 # 圧力差 (Pa)
@@ -22,50 +22,78 @@ def calculate_t_star(time, rmax):
     denominator = 0.91468 * (rmax / 1000) * (rho / delta_p)**0.5
     return time / denominator
 
-# 最大・崩壊点検出関数
+# 最大・崩壊点検出関数 (修正済み: 8枚目以降に検索を限定し、崩壊点以降を無視)
 def find_bubble_points(radius_data):
     """
     気泡の最大半径点と最初の極小点（崩壊点）を見つける
+    検索は画像の8番目（インデックス7）から開始し、最初の崩壊点までを有効範囲とする
     """
     max_radius = 0
     max_index = -1
     collapse_index = -1
+    
+    # Rmax/崩壊点の検索開始インデックスを 7 (8枚目) に設定
+    START_INDEX = 10
+    
+    if len(radius_data) <= START_INDEX:
+        return -1, -1 # 検索範囲がない
+        
+    # ----------------------------------------------
+    # 1. 崩壊点の先行検出 (検索範囲の決定)
+    # ----------------------------------------------
+    # 崩壊点が見つかった場合、そこを検索の終了点とする
+    # 崩壊点が見つからない場合は、データリストの最後までを検索対象とする
+    end_search_index = len(radius_data)
+    radius_threshold = 1.00
 
+    # 8枚目以降で崩壊点を最初に検出
+    # i=START_INDEX (7) から len(radius_data)-1 まで
+    for i in range(START_INDEX, len(radius_data)):
+        
+        # 局所的な極小点を見つけるロジック (端の処理を含む)
+        is_local_minimum = False
+        if i > START_INDEX and i < len(radius_data) - 1:
+            if radius_data[i] < radius_threshold and radius_data[i] < radius_data[i-1] and radius_data[i] <= radius_data[i+1]:
+                is_local_minimum = True
+        elif i == len(radius_data) - 1 and radius_data[i] < radius_data[i-1] and i >= START_INDEX:
+            is_local_minimum = True
+            
+        if is_local_minimum:
+            collapse_index = i
+            end_search_index = i + 1 # 崩壊点を含めて検索を終了
+            break
+            
+        # 0に戻った点も崩壊点と見なす
+        if radius_data[i] == 0 and i >= START_INDEX:
+            # 既に極小点として検出されていなければ
+            if collapse_index == -1: 
+                collapse_index = i
+            end_search_index = i + 1
+            break
+            
+    # ----------------------------------------------
+    # 2. 決定された範囲 (START_INDEX から end_search_index-1) でRmaxを検出
+    # ----------------------------------------------
+    
     started = False
-    for i, radius in enumerate(radius_data):
+    for i in range(START_INDEX, end_search_index):
+        radius = radius_data[i]
+        
         if not started and radius > 0:
             started = True
         if started:
             if radius > max_radius:
                 max_radius = radius
                 max_index = i
-
-    radius_threshold = 1.00
-    if max_index != -1:
-        for i in range(max_index + 1, len(radius_data)):
-            if i > 0 and i < len(radius_data) - 1:
-                if radius_data[i] < radius_threshold and radius_data[i] < radius_data[i-1] and radius_data[i] <= radius_data[i+1]:
-                    collapse_index = i
-                    break 
-            elif i == len(radius_data) - 1:
-                if radius_data[i] < radius_data[i-1]:
-                    collapse_index = i
-                    break
-    
-    if collapse_index == -1:
-        for i in range(max_index + 1, len(radius_data)):
-            if radius_data[i] == 0:
-                collapse_index = i
-                break
     
     return max_index, collapse_index
 
-# 計算関数
+# 体積・重心計算関数 (変更なし)
 def calculate_properties_from_binary(binary_path, wall_x_pixel, calibration, min_area_pixel2, max_individual_bubbles=4):
     
     empty_agg = {k: 0 for k in ['volume', 'radius', 'center_x', 'center_y', 'x_min_mm', 'x_max_mm', 'y_min_mm', 'y_max_mm', 'v_agarose', 'v_water', 'x_agarose', 'y_agarose', 'x_water', 'y_water', 'aspect_ratio']}
 
-    if not os.path.isfile(binary_path):
+    if binary_path is None or not os.path.isfile(binary_path):
         return empty_agg, []
     
     try:
@@ -74,8 +102,7 @@ def calculate_properties_from_binary(binary_path, wall_x_pixel, calibration, min
             return empty_agg, []
             
         wall_x = int(wall_x_pixel) if wall_x_pixel is not None else -1 
-        height, width = binary.shape[:2]
-
+        
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         all_bubble_data = []
@@ -193,6 +220,7 @@ def calculate_properties_from_binary(binary_path, wall_x_pixel, calibration, min
             x_water_mm = (m_x_water_sum / v_water_sum_pix3) / calibration if v_water_sum_pix3 > 0 else 0
             y_water_mm = (m_y_water_sum / v_water_sum_pix3) / calibration if v_water_sum_pix3 > 0 else 0
             
+            # 最大気泡のアスペクト比 (集計データに含めるため、ここでは最大体積の気泡のアスペクト比を代表値とする)
             max_bubble = max(all_bubble_data, key=lambda x: x['volume_pixel3'])
             max_bubble_ar = max_bubble['aspect_ratio']
             
@@ -239,6 +267,9 @@ def calculate_properties_from_binary(binary_path, wall_x_pixel, calibration, min
         print(f"体積計算でエラーが発生しました: {binary_path} - {str(e)}")
         return empty_agg, []
 
+# ==============================================================================
+# フォルダごとのRmaxを使用するよう修正されたメイン関数
+# ==============================================================================
 
 def stage2_main(base_path, start_folder, end_folder, calibration, time_interval, start_image_num, min_area_pixel2, max_individual_bubbles=4, excel_file_name='analysis_result.xlsx'):
     
@@ -262,7 +293,7 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
     
     all_aggregate_data = {}
     all_individual_data = {}
-    max_radii = {}
+    max_radii = {} # 各フォルダの最大半径 Rmax (t*計算用)
     gammas = {}
     
     excel_path = os.path.join(results_base_path, excel_file_name).replace('/', '\\')
@@ -272,45 +303,59 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
     folder_list = list(range(start_folder, end_folder + 1))
     
     # ----------------------------------------------------
-    # A. t*計算のための Rmax 決定
+    # A. t*計算のための Rmax 決定（フォルダごと）(修正済み: 崩壊点まででRmaxを決定)
     # ----------------------------------------------------
-    rmax_for_t_star = 0
-    all_temp_radius_data = [] 
     
     for folder_num in folder_list:
         folder_name = str(folder_num)
         binary_folder = os.path.join(binary_base_path, folder_name).replace('/', '\\')
         
-        if not os.path.exists(binary_folder): continue
+        if not os.path.exists(binary_folder): 
+            max_radii[folder_name] = 0
+            continue
         
         current_wall_x_pixel = reference_dict.get(folder_num, None)
         file_list = sorted([f for f in os.listdir(binary_folder) if f.endswith('_binary.bmp')])
         
-        temp_radius_data = []
-        temp_max_radius_mm = 0
-        
+        # 1. 全フレームの半径データを取得
+        radius_data_all = []
         for file_name in file_list:
             binary_path = os.path.join(binary_folder, file_name).replace('/', '\\')
             agg_data, _ = calculate_properties_from_binary(binary_path, current_wall_x_pixel, calibration, min_area_pixel2, 0)
-            frame_radius = agg_data.get('radius', 0) if agg_data else 0
-            temp_radius_data.append(frame_radius)
-            temp_max_radius_mm = max(temp_max_radius_mm, frame_radius)
+            radius_data_all.append(agg_data.get('radius', 0) if agg_data else 0)
         
-        all_temp_radius_data.extend(temp_radius_data)
+        # 2. 8枚目以降、崩壊点までの範囲で最大半径 Rmax を決定
+        temp_max_radius_mm = 0
+        
+        # Rmax/崩壊点のインデックスを検出 (インデックス7/8枚目から検索)
+        max_index, collapse_index = find_bubble_points(radius_data_all)
+        
+        # 検索開始インデックス: 10 (11枚目)
+        START_INDEX = 10
+
+        # 検索終了インデックス: 崩壊点が見つかった場合、そのインデックス
+        end_index = collapse_index if collapse_index != -1 else len(radius_data_all)
+        
+        # 11枚目から崩壊点までの範囲で最大半径を計算
+        for i in range(START_INDEX, end_index):
+            if i < len(radius_data_all):
+                temp_max_radius_mm = max(temp_max_radius_mm, radius_data_all[i])
+            
+        # フォルダごとの Rmax を保存
         max_radii[folder_name] = temp_max_radius_mm
 
-    max_index, _ = find_bubble_points(all_temp_radius_data)
-    rmax_for_t_star = all_temp_radius_data[max_index] if max_index != -1 and max_index < len(all_temp_radius_data) else 0
-    
     # ----------------------------------------------------
-    # B. 最終データ収集のためのループ
+    # B. 最終データ収集のためのループ (修正済み: 7枚目までの集計値を0に設定)
     # ----------------------------------------------------
     
     for folder_num in folder_list:
         folder_name = str(folder_num)
         binary_folder = os.path.join(binary_base_path, folder_name).replace('/', '\\')
         
-        if folder_name not in max_radii or not os.path.exists(binary_folder): continue
+        current_rmax_for_t_star = max_radii.get(folder_name, 0) # フォルダRmaxを取得
+        
+        # フォルダの最大半径 Rmax が 0 の場合、またはフォルダが存在しない場合はスキップ
+        if current_rmax_for_t_star == 0 or not os.path.exists(binary_folder): continue
 
         print(f"フォルダ {folder_name} のデータ処理中...")
         
@@ -321,20 +366,34 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
         folder_indiv_data = []
         
         for idx, file_name in enumerate(file_list):
-            binary_path = os.path.join(binary_folder, file_name).replace('/', '\\')
             
-            agg_data, indiv_data = calculate_properties_from_binary(binary_path, current_wall_x_pixel, calibration, min_area_pixel2, max_individual_bubbles)
+            # --- 修正ロジックの適用: 7枚目までの集計値は0 ---
+            if idx < start_image_num - 1: # start_image_num=7 の場合、idx=0から5 (1枚目から6枚目)
+                # 7枚目まではファイルパスをNoneとし、calculate_properties_from_binaryで全0データを得る
+                agg_data, indiv_data = calculate_properties_from_binary(None, None, calibration, min_area_pixel2, 0)
+            
+            elif idx == start_image_num - 1: # idx=6 (7枚目)
+                # 7枚目のみ、集計データは0にするが、個別データも0に
+                agg_data, indiv_data = calculate_properties_from_binary(None, None, calibration, min_area_pixel2, 0)
 
-            if idx < start_image_num - 1 or rmax_for_t_star == 0:
+            else: # idx >= start_image_num (8枚目以降)
+                # 8枚目以降は通常通り計算
+                binary_path = os.path.join(binary_folder, file_name).replace('/', '\\')
+                agg_data, indiv_data = calculate_properties_from_binary(binary_path, current_wall_x_pixel, calibration, min_area_pixel2, max_individual_bubbles)
+            # --------------------------
+
+            # t* の計算
+            if idx < start_image_num - 1: # 7枚目 (インデックス6) まで
                 t_star = 0
-            else:
+            else: # 8枚目 (インデックス7) 以降
                 elapsed_time = (idx - (start_image_num - 1)) * time_interval
-                t_star = calculate_t_star(elapsed_time, rmax_for_t_star)
+                t_star = calculate_t_star(elapsed_time, current_rmax_for_t_star) 
             
             if agg_data:
                 agg_data['t_star'] = t_star 
                 folder_agg_data.append(agg_data) 
             
+            # 個別気泡データ
             folder_indiv_data.append({
                 't_star': t_star,
                 'bubbles': indiv_data
@@ -343,35 +402,36 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
         all_aggregate_data[folder_name] = folder_agg_data
         all_individual_data[folder_name] = folder_indiv_data
         
-        # γの計算
+        # ------------------------------------------------------------------------
+        # γの計算 (変更なし)
+        # ------------------------------------------------------------------------
         gamma = 0
-        if len(folder_agg_data) >= 8 and folder_num in reference_dict and rmax_for_t_star > 0:
-            base_x_mm = reference_dict[folder_num] / calibration
-            initial_data_index = start_image_num - 1
+        current_rmax = current_rmax_for_t_star # Rmax (分母)
+        INITIAL_X_INDEX = 9 # 10枚目
+
+        if len(folder_indiv_data) > INITIAL_X_INDEX and folder_num in reference_dict and current_rmax > 0:
             
-            if initial_data_index < len(folder_indiv_data):
-                initial_frame_data = folder_indiv_data[initial_data_index]['bubbles']
-                
-                if initial_frame_data:
-                    initial_x = initial_frame_data[0]['center_x'] 
-                    gamma = (initial_x - base_x_mm) / rmax_for_t_star
+            base_x_mm = reference_dict[folder_num] / calibration
+            initial_frame_data = folder_indiv_data[INITIAL_X_INDEX]['bubbles']
+            
+            if initial_frame_data:
+                # 最大体積の気泡 (インデックス 0) の中心X座標を取得
+                initial_x = initial_frame_data[0]['center_x'] 
+                gamma = (initial_x - base_x_mm) / current_rmax 
             
             gammas[folder_name] = gamma
         else:
             gammas[folder_name] = 0
+        # ------------------------------------------------------------------------
 
     # ----------------------------------------------------
-    # C. Excel出力処理 (openpyxl ネイティブ書き込み)
+    # C. Excel出力処理 (変更なし: find_bubble_points の修正により、色付けも意図した範囲になる)
     # ----------------------------------------------------
     
     agg_cols_data = ['t_star', 'volume', 'radius', 'center_x', 'center_y', 'x_min_mm', 'x_max_mm', 'y_min_mm', 'y_max_mm', 'v_agarose', 'v_water', 'x_agarose', 'y_agarose', 'x_water', 'y_water', 'aspect_ratio']
-    indiv_cols_data = ['t_star', 'volume', 'center_x', 'center_y']
     num_indiv_cols_per_bubble = 3 
-    
-    # 体積列のインデックスを取得 (リスト内の位置は0から数えて 1 )
     VOLUME_DATA_INDEX = agg_cols_data.index('volume') 
     
-    # スタイルを定義
     RED_FILL = PatternFill(fgColor='FF0000', fill_type='solid')
     YELLOW_FILL = PatternFill(fgColor='FFFF00', fill_type='solid')
     
@@ -387,7 +447,6 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
         for folder_num in folder_list:
             folder_name = str(folder_num)
             if folder_name not in all_aggregate_data: 
-                # 処理をスキップしたフォルダの列をスキップするロジックは不要 (ヘッダーなしでデータ開始)
                 continue 
                 
             agg_data = all_aggregate_data[folder_name]
@@ -412,10 +471,10 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
 
             # 3. データ本体 (行6以降)
             radius_data = [d.get('radius', 0) for d in agg_data]
-            max_index, collapse_index = find_bubble_points(radius_data)
+            # find_bubble_points は 8枚目以降かつ崩壊点までで検索を行う
+            max_index, collapse_index = find_bubble_points(radius_data) 
             
-            # 色付け対象の列インデックス (Excel 1-based)
-            volume_col_excel = current_col + VOLUME_DATA_INDEX
+            VOLUME_DATA_INDEX_IN_LOOP = agg_cols_data.index('volume')
             
             for row_idx in range(120):
                 data_row = row_idx + 6 # Excelの行番号
@@ -426,15 +485,15 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
                     # 4. データ書き込み
                     for col_idx, col_name in enumerate(agg_cols_data):
                         value = frame_data.get(col_name)
-                        ws1.cell(row=data_row, column=current_col + col_idx, value=value)
+                        cell = ws1.cell(row=data_row, column=current_col + col_idx, value=value)
                         
                         # --- 色付けロジック ---
-                        # 体積列にのみ適用
-                        if col_idx == VOLUME_DATA_INDEX:
+                        # max_index/collapse_index は8枚目以降の有効なインデックスのみを持つ
+                        if col_idx == VOLUME_DATA_INDEX_IN_LOOP:
                             if row_idx == max_index:
-                                ws1.cell(row=data_row, column=current_col + col_idx, value=value).fill = RED_FILL
+                                cell.fill = RED_FILL
                             elif row_idx == collapse_index:
-                                ws1.cell(row=data_row, column=current_col + col_idx, value=value).fill = YELLOW_FILL
+                                cell.fill = YELLOW_FILL
             
             # 次のフォルダの開始列へ
             current_col += len(agg_cols_data)
@@ -495,25 +554,25 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
 
 if __name__ == "__main__":
     # --- Stage 2 設定 ---
-    base_path = r'C:\Research\exp_data\20250611' 
+    base_path = r'C:\Research\exp_data\20231210' 
     start_folder = 2
-    end_folder = 116
-    
+    end_folder = 84
+
     # 計算パラメータ
-    calibration = 39.4
+    calibration = 38
     time_interval = 0.000005
-    start_image_num = 7
-    min_area_pixel2 = 50 
+    start_image_num = 7 # t*=0とする画像番号 (1枚目から7枚目までが集計値0、8枚目以降で計算)
+    min_area_pixel2 = 0
     max_individual_bubbles = 4
 
     try:
         stage2_main(base_path, start_folder, end_folder, calibration, time_interval, start_image_num,
-                    min_area_pixel2, max_individual_bubbles, excel_file_name="final_analysis_multi_sheet.xlsx")
+                    min_area_pixel2, max_individual_bubbles, excel_file_name="2_analysis_20231210.xlsx")
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
 
-            #calibration一覧
+    #calibration一覧
     #20231210(0.7) - 38
     #20250417(0.4) - 32.2
     #20250611(0.5) - 39.4
-    #20250819(0.3) - 39.5
+    #20250819(0.5) - 39.5
