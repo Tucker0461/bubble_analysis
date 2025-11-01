@@ -101,7 +101,7 @@ def load_background_image(folder_path, blur_x, blur_y, background_no):
         return None
 
 
-def process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, morph_x, morph_y, diff_threshold, wall_x_pixel, min_area_pixel2):
+def process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, morph_x, morph_y, itr, diff_threshold, wall_x_pixel, min_area_pixel2):
     """
     画像を読み込み、背景差分で2値化し、結果を描画して保存する。
     """
@@ -130,7 +130,7 @@ def process_and_save_binary(image_path, binary_output_path, result_output_path, 
 
     # 2. モルフォロジー演算
     kernel = np.ones((morph_x, morph_y), np.uint8)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=itr)
 
     # ----------------------------------------------------
     # 【追加: 穴埋め（Fill Holes）処理のロジック】
@@ -185,7 +185,7 @@ def process_and_save_binary(image_path, binary_output_path, result_output_path, 
         return False
 
 
-def stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, morph_y, diff_threshold, min_area_pixel2):
+def stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, morph_y, itr, diff_threshold, min_area_pixel2):
     # 基準値ファイルのパスを正規化
     reference_path = os.path.join(base_path, 'reference.xlsx').replace('/', '\\')
     
@@ -233,24 +233,25 @@ def stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, mo
                 # 【修正点】ファイル名指定: _result.bmp
                 result_output_path = os.path.join(result_folder, f"{os.path.splitext(file_name)[0]}_result.bmp").replace('/', '\\')
                 
-                process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, morph_x, morph_y, diff_threshold, wall_x_pixel=current_wall_x_pixel, min_area_pixel2=min_area_pixel2)
+                process_and_save_binary(image_path, binary_output_path, result_output_path, blurred_background, blur_x, blur_y, morph_x, morph_y, itr, diff_threshold, wall_x_pixel=current_wall_x_pixel, min_area_pixel2=min_area_pixel2)
                 
     print("Stage 1 完了: 全ての2値化画像と結果描画画像を保存しました。")
 
 if __name__ == "__main__":
     # --- Stage 1 設定 ---
-    base_path = r'C:\Research\exp_data\20250819' 
-    start_folder = 2
-    end_folder = 120
-    background_no = 6
-    
+    base_path = r'C:\Research\exp_data\20250611' 
+    start_folder = 63
+    end_folder = 63
+    background_no = 120
+
     # 2値化パラメータ
-    diff_threshold = 35 # 背景差分後の閾値
+    diff_threshold = 10 # 背景差分後の閾値
     blur_x = blur_y = 1
     morph_x = morph_y = 3
-    min_area_pixel2 = 40
+    itr = 2
+    min_area_pixel2 = 0
 
     try:
-        stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, morph_y, diff_threshold, min_area_pixel2)
+        stage1_main(base_path, start_folder, end_folder, blur_x, blur_y, morph_x, morph_y, itr, diff_threshold, min_area_pixel2)
     except Exception as e:
         print(f"Stage 1 実行中にエラーが発生しました: {str(e)}")

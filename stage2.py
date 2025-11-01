@@ -43,7 +43,7 @@ def find_bubble_points(radius_data):
     # ----------------------------------------------
     # 崩壊点が見つかった場合、そこを検索の終了点とする
     end_search_index = len(radius_data)
-    radius_threshold = 1.00
+    radius_threshold = 0.5
 
     for i in range(START_INDEX, len(radius_data)):
         
@@ -667,12 +667,12 @@ def stage2_main(base_path, start_folder, end_folder, calibration, time_interval,
 
 if __name__ == "__main__":
     # --- Stage 2 設定 ---
-    base_path = r'C:\Research\exp_data\20231210' 
+    base_path = r'C:\Research\exp_data\20250611' 
     start_folder = 2
-    end_folder = 84
+    end_folder = 150
 
     # 計算パラメータ
-    calibration = 38
+    calibration = 39.4
     time_interval = 0.000005
     start_image_num = 7 # t*=0とする画像番号 (1枚目から7枚目までが集計値0、8枚目以降で計算)
     min_area_pixel2 = 0
@@ -680,6 +680,12 @@ if __name__ == "__main__":
 
     try:
         stage2_main(base_path, start_folder, end_folder, calibration, time_interval, start_image_num,
-                    min_area_pixel2, max_individual_bubbles, excel_file_name="3_analysis_20231210.xlsx")
+                    min_area_pixel2, max_individual_bubbles, excel_file_name="6_analysis_20250611.xlsx")
     except Exception as e:
         print(f"プログラム実行中にエラーが発生しました: {str(e)}")
+
+    #calibration一覧
+    #20231210(0.7) - 38
+    #20250417(0.4) - 32.2
+    #20250611(0.5) - 39.4
+    #20250819(0.5) - 39.5
